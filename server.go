@@ -51,9 +51,9 @@ type Server struct {
 	// goroutine pool
 	gPool GPool
 	// user's handle
-	userConnectHandle   func(ctx context.Context, writer io.Writer, request *Request) error
+	userConnectHandle   func(ctx context.Context, sf *Server, writer io.Writer, request *Request) error
 	userBindHandle      func(ctx context.Context, writer io.Writer, request *Request) error
-	userAssociateHandle func(ctx context.Context, writer io.Writer, request *Request) error
+	userAssociateHandle func(ctx context.Context, sf *Server, writer io.Writer, request *Request) error
 }
 
 // NewServer creates a new Server
@@ -98,10 +98,11 @@ func (sf *Server) Serve(l net.Listener) error {
 	defer l.Close()
 	for {
 		conn, err := l.Accept()
+
 		if err != nil {
 			return err
 		}
-		sf.goFunc(func() {
+		sf.GoFunc(func() {
 			if err := sf.ServeConn(conn); err != nil {
 				sf.logger.Errorf("server: %v", err)
 			}
@@ -178,8 +179,16 @@ func (sf *Server) authenticate(conn io.Writer, bufConn io.Reader,
 	return nil, statute.ErrNoSupportedAuth
 }
 
-func (sf *Server) goFunc(f func()) {
+func (sf *Server) GoFunc(f func()) {
 	if sf.gPool == nil || sf.gPool.Submit(f) != nil {
 		go f()
 	}
+}
+
+func (sf *Server) GetBuffer() []byte {
+	return sf.bufferPool.Get()
+}
+
+func (sf *Server) PutBuffer(b []byte) {
+	sf.bufferPool.Put(b)
 }

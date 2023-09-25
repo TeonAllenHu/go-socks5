@@ -84,7 +84,7 @@ func (sf *Server) handleRequest(write io.Writer, req *Request) error {
 	switch req.Command {
 	case statute.CommandConnect:
 		if sf.userConnectHandle != nil {
-			return sf.userConnectHandle(ctx, write, req)
+			return sf.userConnectHandle(ctx, sf, write, req)
 		}
 		return sf.handleConnect(ctx, write, req)
 	case statute.CommandBind:
@@ -94,7 +94,7 @@ func (sf *Server) handleRequest(write io.Writer, req *Request) error {
 		return sf.handleBind(ctx, write, req)
 	case statute.CommandAssociate:
 		if sf.userAssociateHandle != nil {
-			return sf.userAssociateHandle(ctx, write, req)
+			return sf.userAssociateHandle(ctx, sf, write, req)
 		}
 		return sf.handleAssociate(ctx, write, req)
 	default:
@@ -137,8 +137,8 @@ func (sf *Server) handleConnect(ctx context.Context, writer io.Writer, request *
 
 	// Start proxying
 	errCh := make(chan error, 2)
-	sf.goFunc(func() { errCh <- sf.Proxy(target, request.Reader) })
-	sf.goFunc(func() { errCh <- sf.Proxy(writer, target) })
+	sf.GoFunc(func() { errCh <- sf.Proxy(target, request.Reader) })
+	sf.GoFunc(func() { errCh <- sf.Proxy(writer, target) })
 	// Wait
 	for i := 0; i < 2; i++ {
 		e := <-errCh
@@ -182,7 +182,7 @@ func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request
 		return fmt.Errorf("failed to send reply, %v", err)
 	}
 
-	sf.goFunc(func() {
+	sf.GoFunc(func() {
 		// read from client and write to remote server
 		conns := sync.Map{}
 		bufPool := sf.bufferPool.Get()
@@ -229,7 +229,7 @@ func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request
 				}
 				conns.Store(connKey, targetNew)
 				// read from remote server and write to original client
-				sf.goFunc(func() {
+				sf.GoFunc(func() {
 					bufPool := sf.bufferPool.Get()
 					defer func() {
 						targetNew.Close()
