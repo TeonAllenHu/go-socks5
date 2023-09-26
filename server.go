@@ -9,8 +9,8 @@ import (
 	"log"
 	"net"
 
-	"github.com/things-go/go-socks5/bufferpool"
-	"github.com/things-go/go-socks5/statute"
+	"github.com/TeonAllenHu/go-socks5/bufferpool"
+	"github.com/TeonAllenHu/go-socks5/statute"
 )
 
 // GPool is used to implement custom goroutine pool default use goroutine
@@ -45,7 +45,9 @@ type Server struct {
 	// Defaults to io.Discard.
 	logger Logger
 	// Optional function for dialing out
-	dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	connectDial func(ctx context.Context, addr string) (net.Conn, error)
+	// Optional function for dialing out
+	associateDial func(ctx context.Context, addr string) (net.Conn, error)
 	// buffer pool
 	bufferPool bufferpool.BufPool
 	// goroutine pool
@@ -64,8 +66,11 @@ func NewServer(opts ...Option) *Server {
 		resolver:    DNSResolver{},
 		rules:       NewPermitAll(),
 		logger:      NewLogger(log.New(io.Discard, "socks5: ", log.LstdFlags)),
-		dial: func(ctx context.Context, net_, addr string) (net.Conn, error) {
-			return net.Dial(net_, addr)
+		connectDial: func(ctx context.Context, addr string) (net.Conn, error) {
+			return net.Dial("tcp", addr)
+		},
+		associateDial: func(ctx context.Context, addr string) (net.Conn, error) {
+			return net.Dial("udp", addr)
 		},
 	}
 
@@ -140,7 +145,7 @@ func (sf *Server) ServeConn(conn net.Conn) error {
 	request, err := ParseRequest(bufConn)
 	if err != nil {
 		if errors.Is(err, statute.ErrUnrecognizedAddrType) {
-			if err := SendReply(conn, statute.RepAddrTypeNotSupported, nil); err != nil {
+			if err := SendReply(conn, statute.RepAddrTypeNotSupported); err != nil {
 				return fmt.Errorf("failed to send reply %w", err)
 			}
 		}
@@ -150,7 +155,7 @@ func (sf *Server) ServeConn(conn net.Conn) error {
 	if request.Request.Command != statute.CommandConnect &&
 		request.Request.Command != statute.CommandBind &&
 		request.Request.Command != statute.CommandAssociate {
-		if err := SendReply(conn, statute.RepCommandNotSupported, nil); err != nil {
+		if err := SendReply(conn, statute.RepCommandNotSupported); err != nil {
 			return fmt.Errorf("failed to send reply, %v", err)
 		}
 		return fmt.Errorf("unrecognized command[%d]", request.Request.Command)

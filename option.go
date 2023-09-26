@@ -5,7 +5,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/things-go/go-socks5/bufferpool"
+	"github.com/TeonAllenHu/go-socks5/bufferpool"
 )
 
 // Option user's option
@@ -80,10 +80,17 @@ func WithLogger(l Logger) Option {
 	}
 }
 
-// WithDial Optional function for dialing out
-func WithDial(dial func(ctx context.Context, network, addr string) (net.Conn, error)) Option {
+// WithConnectDial Optional function for dialing out
+func WithConnectDial(dial func(ctx context.Context, addr string) (net.Conn, error)) Option {
 	return func(s *Server) {
-		s.dial = dial
+		s.connectDial = dial
+	}
+}
+
+// WithDial Optional function for dialing out
+func WithAssociateDial(dial func(ctx context.Context, addr string) (net.Conn, error)) Option {
+	return func(s *Server) {
+		s.associateDial = dial
 	}
 }
 

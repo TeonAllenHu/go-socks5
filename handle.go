@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/things-go/go-socks5/statute"
+	"github.com/TeonAllenHu/go-socks5/statute"
 )
 
 // AddressRewriter is used to rewrite a destination transparently
@@ -57,7 +57,7 @@ func (sf *Server) handleRequest(write io.Writer, req *Request) error {
 	if dest.FQDN != "" {
 		ctx, dest.IP, err = sf.resolver.Resolve(ctx, dest.FQDN)
 		if err != nil {
-			if err := SendReply(write, statute.RepHostUnreachable, nil); err != nil {
+			if err := SendReply(write, statute.RepHostUnreachable); err != nil {
 				return fmt.Errorf("failed to send reply, %v", err)
 			}
 			return fmt.Errorf("failed to resolve destination[%v], %v", dest.FQDN, err)
@@ -74,7 +74,7 @@ func (sf *Server) handleRequest(write io.Writer, req *Request) error {
 	var ok bool
 	ctx, ok = sf.rules.Allow(ctx, req)
 	if !ok {
-		if err := SendReply(write, statute.RepRuleFailure, nil); err != nil {
+		if err := SendReply(write, statute.RepRuleFailure); err != nil {
 			return fmt.Errorf("failed to send reply, %v", err)
 		}
 		return fmt.Errorf("bind to %v blocked by rules", req.RawDestAddr)
@@ -98,7 +98,7 @@ func (sf *Server) handleRequest(write io.Writer, req *Request) error {
 		}
 		return sf.handleAssociate(ctx, write, req)
 	default:
-		if err := SendReply(write, statute.RepCommandNotSupported, nil); err != nil {
+		if err := SendReply(write, statute.RepCommandNotSupported); err != nil {
 			return fmt.Errorf("failed to send reply, %v", err)
 		}
 		return fmt.Errorf("unsupported command[%v]", req.Command)
@@ -108,13 +108,13 @@ func (sf *Server) handleRequest(write io.Writer, req *Request) error {
 // handleConnect is used to handle a connect command
 func (sf *Server) handleConnect(ctx context.Context, writer io.Writer, request *Request) error {
 	// Attempt to connect
-	dial := sf.dial
+	dial := sf.connectDial
 	if dial == nil {
-		dial = func(ctx context.Context, net_, addr string) (net.Conn, error) {
-			return net.Dial(net_, addr)
+		dial = func(ctx context.Context, addr string) (net.Conn, error) {
+			return net.Dial("tcp", addr)
 		}
 	}
-	target, err := dial(ctx, "tcp", request.DestAddr.String())
+	target, err := dial(ctx, request.DestAddr.String())
 	if err != nil {
 		msg := err.Error()
 		resp := statute.RepHostUnreachable
@@ -123,7 +123,7 @@ func (sf *Server) handleConnect(ctx context.Context, writer io.Writer, request *
 		} else if strings.Contains(msg, "network is unreachable") {
 			resp = statute.RepNetworkUnreachable
 		}
-		if err := SendReply(writer, resp, nil); err != nil {
+		if err := SendReply(writer, resp); err != nil {
 			return fmt.Errorf("failed to send reply, %v", err)
 		}
 		return fmt.Errorf("connect to %v failed, %v", request.RawDestAddr, err)
@@ -131,7 +131,7 @@ func (sf *Server) handleConnect(ctx context.Context, writer io.Writer, request *
 	defer target.Close()
 
 	// Send success
-	if err := SendReply(writer, statute.RepSuccess, target.LocalAddr()); err != nil {
+	if err := SendReplyWithAddr(writer, statute.RepSuccess, target.LocalAddr()); err != nil {
 		return fmt.Errorf("failed to send reply, %v", err)
 	}
 
@@ -153,7 +153,7 @@ func (sf *Server) handleConnect(ctx context.Context, writer io.Writer, request *
 // handleBind is used to handle a connect command
 func (sf *Server) handleBind(_ context.Context, writer io.Writer, _ *Request) error {
 	// TODO: Support bind
-	if err := SendReply(writer, statute.RepCommandNotSupported, nil); err != nil {
+	if err := SendReply(writer, statute.RepCommandNotSupported); err != nil {
 		return fmt.Errorf("failed to send reply: %v", err)
 	}
 	return nil
@@ -162,15 +162,15 @@ func (sf *Server) handleBind(_ context.Context, writer io.Writer, _ *Request) er
 // handleAssociate is used to handle a connect command
 func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request *Request) error {
 	// Attempt to connect
-	dial := sf.dial
+	dial := sf.associateDial
 	if dial == nil {
-		dial = func(_ context.Context, net_, addr string) (net.Conn, error) {
-			return net.Dial(net_, addr)
+		dial = func(_ context.Context, addr string) (net.Conn, error) {
+			return net.Dial("udp", addr)
 		}
 	}
 	bindLn, err := net.ListenUDP("udp", nil)
 	if err != nil {
-		if err := SendReply(writer, statute.RepServerFailure, nil); err != nil {
+		if err := SendReply(writer, statute.RepServerFailure); err != nil {
 			return fmt.Errorf("failed to send reply, %v", err)
 		}
 		return fmt.Errorf("listen udp failed, %v", err)
@@ -178,7 +178,7 @@ func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request
 
 	sf.logger.Errorf("client want to used addr %v, listen addr: %s", request.DestAddr, bindLn.LocalAddr())
 	// send BND.ADDR and BND.PORT, client used
-	if err = SendReply(writer, statute.RepSuccess, bindLn.LocalAddr()); err != nil {
+	if err = SendReplyWithAddr(writer, statute.RepSuccess, bindLn.LocalAddr()); err != nil {
 		return fmt.Errorf("failed to send reply, %v", err)
 	}
 
@@ -221,7 +221,7 @@ func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request
 
 			if target, ok := conns.Load(connKey); !ok {
 				// if the 'connection' doesn't exist, create one and store it
-				targetNew, err := dial(ctx, "udp", pk.DstAddr.String())
+				targetNew, err := dial(ctx, pk.DstAddr.String())
 				if err != nil {
 					sf.logger.Errorf("connect to %v failed, %v", pk.DstAddr, err)
 					// TODO:continue or return Error?
@@ -290,7 +290,24 @@ func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request
 
 // SendReply is used to send a reply message
 // rep: reply status see statute's statute file
-func SendReply(w io.Writer, rep uint8, bindAddr net.Addr) error {
+func SendReply(w io.Writer, rep uint8) error {
+	rsp := statute.Reply{
+		Version:  statute.VersionSocks5,
+		Response: rep,
+		BndAddr: statute.AddrSpec{
+			AddrType: statute.ATYPIPv4,
+			IP:       net.IPv4zero,
+			Port:     0,
+		},
+	}
+	// Send the message
+	_, err := w.Write(rsp.Bytes())
+	return err
+}
+
+// SendReply is used to send a reply message
+// rep: reply status see statute's statute file
+func SendReplyWithAddr(w io.Writer, rep uint8, bindAddr net.Addr) error {
 	rsp := statute.Reply{
 		Version:  statute.VersionSocks5,
 		Response: rep,

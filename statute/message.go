@@ -122,6 +122,33 @@ type Reply struct {
 }
 
 // Bytes returns a slice of request
+/*
+func (sf Reply) Bytes() (b []byte) {
+	var addr []byte
+
+	length := 6
+	if sf.BndAddr.AddrType == ATYPIPv4 {
+		length += net.IPv4len
+		addr = sf.BndAddr.IP.To4()
+	} else if sf.BndAddr.AddrType == ATYPIPv6 {
+		length += net.IPv6len
+		addr = sf.BndAddr.IP.To16()
+	} else { // ATYPDomain
+		length += 1 + len(sf.BndAddr.FQDN)
+		addr = []byte(sf.BndAddr.FQDN)
+	}
+
+	b = make([]byte, 0, length)
+	b = append(b, sf.Version, sf.Response, sf.Reserved, sf.BndAddr.AddrType)
+	if sf.BndAddr.AddrType == ATYPDomain {
+		b = append(b, byte(len(sf.BndAddr.FQDN)))
+	}
+	b = append(b, addr...)
+	b = append(b, byte(sf.BndAddr.Port>>8), byte(sf.BndAddr.Port))
+	return b
+}*/
+
+// Bytes returns a slice of request
 func (sf Reply) Bytes() (b []byte) {
 	var addr []byte
 
