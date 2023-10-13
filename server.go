@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"time"
 
 	"github.com/TeonAllenHu/go-socks5/bufferpool"
 	"github.com/TeonAllenHu/go-socks5/statute"
@@ -56,6 +57,8 @@ type Server struct {
 	userConnectHandle   func(ctx context.Context, sf *Server, writer io.Writer, request *Request) error
 	userBindHandle      func(ctx context.Context, writer io.Writer, request *Request) error
 	userAssociateHandle func(ctx context.Context, sf *Server, writer io.Writer, request *Request) error
+
+	cancel func()
 }
 
 // NewServer creates a new Server
@@ -98,6 +101,52 @@ func (sf *Server) ListenAndServe(network, addr string) error {
 	return sf.Serve(l)
 }
 
+// ListenTcpAndServe is used to create a listener and serve on it
+func (sf *Server) ListenTcpAndServe(addr string) error {
+	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+	if err != nil {
+		return err
+	}
+	l, err := net.ListenTCP("tcp", tcpAddr)
+	if err != nil {
+		return err
+	}
+	// 创建一个用于取消的context
+	ctx, cancel := context.WithCancel(context.Background())
+	sf.cancel = cancel
+	// 启动一个goroutine来接受连接
+	go sf.acceptConnections(l, ctx)
+	return nil
+}
+
+func (sf *Server) acceptConnections(listener *net.TCPListener, ctx context.Context) {
+	defer listener.Close()
+	for {
+		select {
+		case <-ctx.Done():
+			sf.logger.Errorf("Server stopped")
+			return
+		default:
+			// 设置超时时间以便定期检查ctx.Done()
+			listener.SetDeadline(time.Now().Add(3 * time.Second))
+			conn, err := listener.Accept()
+			if err != nil {
+				// 在超时时Accept会返回错误
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue
+				}
+				sf.logger.Errorf("Error accepting connection:", err)
+				return
+			}
+			sf.GoFunc(func() {
+				if err := sf.ServeConn(conn); err != nil {
+					sf.logger.Errorf("server: %v", err)
+				}
+			})
+		}
+	}
+}
+
 // Serve is used to serve connections from a listener
 func (sf *Server) Serve(l net.Listener) error {
 	defer l.Close()
@@ -107,6 +156,7 @@ func (sf *Server) Serve(l net.Listener) error {
 		if err != nil {
 			return err
 		}
+
 		sf.GoFunc(func() {
 			if err := sf.ServeConn(conn); err != nil {
 				sf.logger.Errorf("server: %v", err)
@@ -182,6 +232,12 @@ func (sf *Server) authenticate(conn io.Writer, bufConn io.Reader,
 	// No usable method found
 	conn.Write([]byte{statute.VersionSocks5, statute.MethodNoAcceptable}) //nolint: errcheck
 	return nil, statute.ErrNoSupportedAuth
+}
+
+func (sf *Server) StopListenTcp() {
+	if sf.cancel != nil {
+		sf.cancel()
+	}
 }
 
 func (sf *Server) GoFunc(f func()) {
